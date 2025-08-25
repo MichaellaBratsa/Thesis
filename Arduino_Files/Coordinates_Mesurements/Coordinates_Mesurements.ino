@@ -1,34 +1,24 @@
-#include <Wire.h>
+#include <Arduino_LSM9DS1.h>
 
-const int MPU_addr = 0x68; // Διεύθυνση I2C του MPU6050
-
-int16_t AcX, AcY, AcZ;
+float ax, ay, az;
 
 void setup() {
-  Wire.begin();
-  Serial.begin(9600);
+  Serial.begin(115200);
+  while (!Serial);
 
-  // Ξύπνα τον αισθητήρα (βρίσκεται σε sleep mode από default)
-  Wire.beginTransmission(MPU_addr);
-  Wire.write(0x6B); // Ρυθμιστικό sleep register
-  Wire.write(0);    // Θέσε το σε 0 για να ξυπνήσει
-  Wire.endTransmission(true);
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while(1);
+  }
 }
 
 void loop() {
-  // Ζήτα δεδομένα από το register 0x3B (Accelerometer X)
-  Wire.beginTransmission(MPU_addr);
-  Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU_addr, 6, true); // Ζήτα 6 bytes (AcX, AcY, AcZ)
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(ax, ay, az);
 
-  AcX = Wire.read() << 8 | Wire.read(); // Συνδυάζει τα MSB & LSB
-  AcY = Wire.read() << 8 | Wire.read();
-  AcZ = Wire.read() << 8 | Wire.read();
-
-  Serial.print("x = "); Serial.print(AcX);
-  Serial.print(" | y = "); Serial.print(AcY);
-  Serial.print(" | z = "); Serial.println(AcZ);
-
-  delay(200);
+    Serial.print("ax:"); Serial.print(ax);
+    Serial.print(" ay:"); Serial.print(ay);
+    Serial.print(" az:"); Serial.println(az);
+  }
+  delay(50); 
 }
