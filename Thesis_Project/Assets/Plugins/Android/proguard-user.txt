@@ -1,0 +1,2 @@
+-keep class com.mbrats01.ble_manager.BleManager { *; }
+-keep interface com.mbrats01.ble_manager.BleCallback { *; }
