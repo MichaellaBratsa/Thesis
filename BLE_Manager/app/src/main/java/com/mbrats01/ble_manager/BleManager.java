@@ -60,7 +60,6 @@ public class BleManager {
         this.unityCallback = callback;
     }
 
-    /** Έναρξη σάρωσης */
     public void startScan() {
         Log.d(TAG, "startScan called.");
 
@@ -77,7 +76,7 @@ public class BleManager {
         }
 
         scanner = bluetoothAdapter.getBluetoothLeScanner();
-        handler.postDelayed(this::stopScan, 10000); // 10 δευτ.
+        handler.postDelayed(this::stopScan, 10000); // 10 sec
         isScanning = true;
 
         java.util.List<android.bluetooth.le.ScanFilter> filters = new java.util.ArrayList<>();
@@ -97,7 +96,6 @@ public class BleManager {
         if (unityCallback != null) unityCallback.onStatusUpdate("Scanning for Arduino...");
     }
 
-    /** Σταμάτημα σάρωσης */
     public void stopScan() {
         if (isScanning && scanner != null) {
             if (hasScanPermission()) {
@@ -119,7 +117,6 @@ public class BleManager {
         }
     }
 
-    /** Σύνδεση σε συσκευή */
     public void connectToDevice(String address) {
         if (!hasConnectPermission()) {
             if (unityCallback != null) unityCallback.onStatusUpdate("Bluetooth Connect permission not granted.");
@@ -144,7 +141,6 @@ public class BleManager {
         bluetoothGatt = device.connectGatt(context, false, gattCallback);
     }
 
-    /** Αποσύνδεση και καθαρισμός */
     public void disconnect() {
         if (bluetoothGatt != null) {
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -165,7 +161,6 @@ public class BleManager {
         }
     }
 
-    /** Έλεγχος permission για σάρωση */
     private boolean hasScanPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
@@ -174,16 +169,15 @@ public class BleManager {
         }
     }
 
-    /** Έλεγχος permission για σύνδεση */
     private boolean hasConnectPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
         } else {
-            return true; // στα Android < 12 δεν υπήρχε ξεχωριστό CONNECT permission
+            return true;
         }
     }
 
-    /** Callback σάρωσης */
+    /** Callback scan */
     private final ScanCallback scanCallback = new ScanCallback() {
         public void onScanResult(int callbackType, ScanResult result) {
             super.onScanResult(callbackType, result);
