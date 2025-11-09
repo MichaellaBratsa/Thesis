@@ -1,151 +1,131 @@
-﻿using UnityEngine;
-using UnityEngine.Android;
-using TMPro;
+﻿//using UnityEngine;
+//using UnityEngine.Android;
+//using System.Globalization;
+//using TMPro;
+//using System.Text;
 
-public class JavaBridge : MonoBehaviour
-{
-    // --- UI Στοιχεία ---
-    public TextMeshProUGUI statusText;
-    public TextMeshProUGUI foundDevicesText;
-    public TextMeshProUGUI perm; // Για το feedback των αδειών
-    public TextMeshProUGUI text;
-    public GameObject connectButton;
+//public class JavaBridge : MonoBehaviour
+//{
+//    public TextMeshProUGUI statusText;
+//    public TextMeshProUGUI devicesText;
+//    public TextMeshProUGUI quaternionText;
+//    public GameObject connectButton;
+//    public MotionManager motionManager; // Θα διαχειρίζεται τα 3 GameObjects
 
-    // --- Εσωτερικές Μεταβλητές ---
-    private AndroidJavaObject bleManager;
-    private string arduinoAddress = null;
+//    private AndroidJavaObject bleManager;
+//    private string arduinoAddress;
 
-    void Start()
-    {
-        // Αρχικοποίηση UI
-        connectButton.SetActive(false);
-        statusText.text = "Bridge Initialized. Ready.";
-        foundDevicesText.text = "Devices";
-        perm.text = "";
+//    void Start()
+//    {
+//        connectButton.SetActive(false);
+//        statusText.text = "Ready for BLE connection";
 
-        // Αρχικοποίηση του Java Plugin
-        using (AndroidJavaClass managerClass = new AndroidJavaClass("com.mbrats01.ble_manager.BleManager"))
-        {
-            bleManager = managerClass.CallStatic<AndroidJavaObject>("getInstance", GetUnityActivity());
-        }
-        BleCallbackProxy callbackProxy = new BleCallbackProxy(this);
-        bleManager.Call("setCallback", callbackProxy);
-    }
+//        using (AndroidJavaClass managerClass = new AndroidJavaClass("com.mbrats01.ble_manager.BleManager"))
+//        {
+//            bleManager = managerClass.CallStatic<AndroidJavaObject>("getInstance", GetUnityActivity());
+//        }
 
-    // --- Κύριες Λειτουργίες (για τα κουμπιά) ---
+//        if (bleManager != null)
+//        {
+//            bleManager.Call("setCallback", new BleCallbackProxy(this));
+//            statusText.text = "BLE manager initialized";
+//        }
+//        else
+//        {
+//            statusText.text = "BLE manager not found!";
+//        }
+//    }
 
-    // Ζητάει τις σωστές άδειες ανάλογα με την έκδοση του Android
-    public void RequestBlePermissions()
-    {
-        var callbacks = new PermissionCallbacks();
-        callbacks.PermissionGranted += (permissionName) => { PrintAllPermissionStates(); };
-        callbacks.PermissionDenied += (permissionName) => { PrintAllPermissionStates(); };
-        callbacks.PermissionDeniedAndDontAskAgain += (permissionName) => { PrintAllPermissionStates(); };
+//    public void RequestBlePermissions()
+//    {
+//        var callbacks = new PermissionCallbacks();
+//        int sdk = new AndroidJavaClass("android.os.Build$VERSION").GetStatic<int>("SDK_INT");
 
-        int sdkInt = new AndroidJavaClass("android.os.Build$VERSION").GetStatic<int>("SDK_INT");
+//        if (sdk >= 31)
+//        {
+//            Permission.RequestUserPermissions(new string[] {
+//                "android.permission.BLUETOOTH_SCAN",
+//                "android.permission.BLUETOOTH_CONNECT",
+//                "android.permission.ACCESS_FINE_LOCATION"
+//            }, callbacks);
+//        }
+//        else
+//        {
+//            Permission.RequestUserPermissions(new string[] {
+//                "android.permission.ACCESS_FINE_LOCATION"
+//            }, callbacks);
+//        }
+//    }
 
-        if (sdkInt >= 31) // Android 12+
-        {
-            Permission.RequestUserPermissions(new string[] {
-                "android.permission.BLUETOOTH_SCAN",
-                "android.permission.BLUETOOTH_CONNECT",
-                "android.permission.ACCESS_COARSE_LOCATION",
-                "android.permission.ACCESS_FINE_LOCATION" // Η ΝΕΑ ΠΡΟΣΘΗΚΗ
-            }, callbacks);
-        }
-        else
-        {
-            Permission.RequestUserPermissions(new string[]
-            {
-                "android.permission.ACCESS_FINE_LOCATION"
-            }, callbacks);
-        }
-    }
+//    public void StartScan()
+//    {
+//        if (bleManager == null) return;
+//        devicesText.text = "";
+//        connectButton.SetActive(false);
+//        bleManager.Call("startScan");
+//    }
 
-    // Ξεκινά τη σάρωση για συσκευές
-    public void StartBleScan()
-{
-    // Reset UI
-    foundDevicesText.text = "";
-    arduinoAddress = null;
-    connectButton.SetActive(false);
+//    public void ConnectToArduino()
+//    {
+//        if (bleManager == null || string.IsNullOrEmpty(arduinoAddress)) return;
+//        bleManager.Call("connectToDevice", arduinoAddress);
+//    }
 
-    // Κλήση στο Java plugin
-    bleManager.Call("startScan");
-}
+//    // --- Callbacks ---
+//    public void OnDeviceFound(string name, string address)
+//    {
+//        UnityMainThreadDispatcher.Instance().Enqueue(() =>
+//        {
+//            devicesText.text += $"{name}\n";
+//            if (name != null && name.Contains("ArmIMU"))
+//            {
+//                arduinoAddress = address;
+//                connectButton.SetActive(true);
+//            }
+//        });
+//    }
 
+//    public void OnStatusUpdate(string msg)
+//    {
+//        UnityMainThreadDispatcher.Instance().Enqueue(() =>
+//        {
+//            statusText.text = "Status: " + msg;
+//        });
+//    }
 
-    // Συνδέεται στο Arduino όταν πατηθεί το κουμπί "Connect"
-    public void ConnectToArduino()
-    {
-        if (!string.IsNullOrEmpty(arduinoAddress))
-        {
-            bleManager.Call("connectToDevice", arduinoAddress);
-        }
-        else
-        {
-            statusText.text = "No Arduino device selected.";
-        }
-    }
+//    public void OnDataReceived(string data)
+//    {
+//        if (string.IsNullOrEmpty(data)) return;
+//        string[] parts = data.Split(',');
+//        if (parts.Length < 5) return;
 
-    // --- Callbacks από Java ---
-    public void OnStatusUpdate(string message)
-    {
-        UnityMainThreadDispatcher.Instance().Enqueue(() => {
-            statusText.text = "Status: " + message;
-        });
-    }
+//        int id = int.Parse(parts[0]);
+//        float qx = float.Parse(parts[1], CultureInfo.InvariantCulture);
+//        float qy = float.Parse(parts[2], CultureInfo.InvariantCulture);
+//        float qz = float.Parse(parts[3], CultureInfo.InvariantCulture);
+//        float qw = float.Parse(parts[4], CultureInfo.InvariantCulture);
 
-    public void OnDeviceFound(string name, string address)
-    {
-        UnityMainThreadDispatcher.Instance().Enqueue(() => {
-            foundDevicesText.text += $"{name} ({address})\n";
-            if (name.Contains("ArduinoBLE_Test"))
-            {
-                arduinoAddress = address;
-                connectButton.SetActive(true);
-            }
-        });
-    }
+//        Quaternion q = new Quaternion(qx, qy, qz, qw);
 
-    public void OnDataReceived(string message)
-    {
-        UnityMainThreadDispatcher.Instance().Enqueue(() => {
-            text.text += $"<color=green>Received: {message}</color>\n";
-        });
-    }
+//        motionManager?.UpdateSensorRotation(id, q);
 
-    // --- Βοηθητικές Μέθοδοι ---
-    private void PrintAllPermissionStates()
-    {
-        string scanStatus = "BLUETOOTH_SCAN: " + Permission.HasUserAuthorizedPermission("android.permission.BLUETOOTH_SCAN");
-        string connectStatus = "BLUETOOTH_CONNECT: " + Permission.HasUserAuthorizedPermission("android.permission.BLUETOOTH_CONNECT");
-        string coarseLocationStatus = "ACCESS_COARSE_LOCATION: " + Permission.HasUserAuthorizedPermission("android.permission.ACCESS_COARSE_LOCATION");
-        string locationStatus = "ACCESS_FINE_LOCATION: " + Permission.HasUserAuthorizedPermission("android.permission.ACCESS_FINE_LOCATION");
+//        quaternionText.text = $"IMU {id}: {qx:F2}, {qy:F2}, {qz:F2}, {qw:F2}";
+//    }
 
-        perm.text = $"{scanStatus}\n{connectStatus}\n{locationStatus}\n{coarseLocationStatus}";
-    }
+//    private AndroidJavaObject GetUnityActivity()
+//    {
+//        using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+//            return unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+//    }
+//}
 
-    private AndroidJavaObject GetUnityActivity()
-    {
-        using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-        {
-            return unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
-        }
-    }
-}
+//// --- BLE callback proxy ---
+//class BleCallbackProxy : AndroidJavaProxy
+//{
+//    private JavaBridge bridge;
+//    public BleCallbackProxy(JavaBridge b) : base("com.mbrats01.ble_manager.BleCallback") { bridge = b; }
 
-// --- Proxy που μεταφράζει τις κλήσεις από Java σε C# ---
-class BleCallbackProxy : AndroidJavaProxy
-{
-    private JavaBridge bridge;
-
-    public BleCallbackProxy(JavaBridge bridge) : base("com.mbrats01.ble_manager.BleCallback")
-    {
-        this.bridge = bridge;
-    }
-
-    public void onStatusUpdate(string message) { bridge.OnStatusUpdate(message); }
-    public void onDeviceFound(string name, string address) { bridge.OnDeviceFound(name, address); }
-    public void onDataReceived(string message) { bridge.OnDataReceived(message); }
-}
+//    public void onStatusUpdate(string message) => bridge.OnStatusUpdate(message);
+//    public void onDeviceFound(string name, string addr) => bridge.OnDeviceFound(name, addr);
+//    public void onDataReceived(string data) => bridge.OnDataReceived(data);
+//}

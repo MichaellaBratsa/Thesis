@@ -1,2 +1,4 @@
 -keep class com.mbrats01.ble_manager.BleManager { *; }
 -keep interface com.mbrats01.ble_manager.BleCallback { *; }
+-keep public class * extends com.unity3d.player.UnityPlayerActivity
+-keep public class * extends android.app.Activity
