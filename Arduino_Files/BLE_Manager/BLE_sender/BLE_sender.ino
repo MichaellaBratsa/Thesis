@@ -1,57 +1,51 @@
 #include <ArduinoBLE.h>
 
-// Define the BLE service and characteristic UUIDs
-BLEService ledService("19B10000-E8F2-537E-4F6C-D104768A1214");
-BLEStringCharacteristic switchCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify, 20);
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E" // TX = Transmit (Arduino -> Κινητό)
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E" // RX = Receive (Κινητό -> Arduino)
 
-int counter = 0;
+// Δημιουργία της υπηρεσίας και των χαρακτηριστικών με τα standard UUIDs
+BLEService uartService(SERVICE_UUID);
+BLECharacteristic txCharacteristic(CHARACTERISTIC_UUID_TX, BLERead | BLENotify, 20);
+// Το RX characteristic είναι για να λαμβάνουμε δεδομένα, δεν το χρειαζόμαστε τώρα, αλλά το ορίζουμε για μελλοντική χρήση
+BLECharacteristic rxCharacteristic(CHARACTERISTIC_UUID_RX, BLEWrite, 20);
+
 
 void setup() {
   Serial.begin(9600);
   while (!Serial);
 
-  // Initialize BLE
   if (!BLE.begin()) {
     Serial.println("Starting BLE failed!");
     while (1);
   }
 
-  // Set the local name for the BLE device
-  BLE.setLocalName("ArduinoNano33BLE");
-  
-  // Set the advertised service UUID
-  BLE.setAdvertisedService(ledService);
+  BLE.setLocalName("ArduinoBLE_Test"); // Άλλαξα το όνομα για να μην μπερδευόμαστε
+  BLE.setAdvertisedService(uartService);
 
-  // Add the service and characteristic
-  ledService.addCharacteristic(switchCharacteristic);
-  BLE.addService(ledService);
+  // Προσθήκη των χαρακτηριστικών στην υπηρεσία
+  uartService.addCharacteristic(txCharacteristic);
+  uartService.addCharacteristic(rxCharacteristic); // Προσθέτουμε και το RX
 
-  // Set an initial value for the characteristic
-  switchCharacteristic.writeValue("Hello Unity!");
+  BLE.addService(uartService);
 
-  // Start advertising
   BLE.advertise();
-  Serial.println("Bluetooth device active, waiting for connections...");
+
+  Serial.println("BLE UART device is now advertising, waiting for connections...");
 }
 
 void loop() {
-  // Wait for a BLE central to connect
   BLEDevice central = BLE.central();
 
   if (central) {
     Serial.print("Connected to central: ");
     Serial.println(central.address());
 
-    while (central.connected()) {
-      // Create a string with the current counter value
-      String message = "Counter: " + String(counter);
-      
-      // Update the characteristic value
-      switchCharacteristic.writeValue(message);
-      Serial.println("Sent: " + message);
-      
-      counter++;
-      delay(1000); // Wait a second
+    while (central.connected()) { ---
+      txCharacteristic.writeValue("hello1\n");
+      txCharacteristic.writeValue("hello\n");
+      Serial.println("Sent: hello");
+      delay(1000);
     }
 
     Serial.print("Disconnected from central: ");
