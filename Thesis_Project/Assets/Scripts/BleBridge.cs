@@ -3,6 +3,8 @@ using UnityEngine.Android;
 using System.Globalization;
 using TMPro;
 using System.Text;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 
 public class BleBridge : MonoBehaviour
@@ -12,31 +14,42 @@ public class BleBridge : MonoBehaviour
 
     const int MAX_QUEUE_SIZE = 5000;
 
-    // ---------- Public events (για ImuVisualizer / άλλα scripts) ----------
+    // ---------- Public events (optional για άλλα scripts) ----------
     public event System.Action<string, string> OnDeviceFound; // (name, address)
     public event System.Action<string> OnStatus;              // status messages
-    public event System.Action<string> OnLine;                // raw line: "id,roll,pitch,yaw" ή "id,qx,qy,qz,qw"
+    public event System.Action<string> OnLine;                // raw line: "id,qx,qy,qz,qw" ή "id,qw,qx,qy,qz"
+
+    public enum QuaternionFormat { XYZW, WXYZ }
+
+    [Header("IMU Quaternion Format")]
+    [Tooltip("Πως στέλνει το Arduino τα 4 στοιχεία μετά το id. ΤΩΡΑ: id,qx,qy,qz,qw => XYZW")]
+    public QuaternionFormat quaternionFormat = QuaternionFormat.XYZW;
+
+    [Tooltip("Αν κάποιο axis βγαίνει ανάποδα, τικάρεις εδώ")]
+    public bool invertX = false;
+    public bool invertY = false;
+    public bool invertZ = false;
 
     [Header("UI")]
     public TextMeshProUGUI statusText;
     public TextMeshProUGUI devicesText;
     public TextMeshProUGUI dataText;
-    public GameObject connectButton; // optional
-    public MotionManager motionManager; // διαχειρίζεται τα 3 GameObjects
+    public GameObject connectButton;      // optional
+    public MotionManager motionManager;   // διαχειρίζεται το rig του χεριού
 
     private AndroidJavaObject bleManager;
     private string arduinoAddress;
 
     // Reassembly buffer για BLE κείμενα (σπαστές γραμμές)
     private readonly StringBuilder lineBuffer = new StringBuilder(4096);
-    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lineQueue =
-        new System.Collections.Concurrent.ConcurrentQueue<string>();
+    private readonly ConcurrentQueue<string> _lineQueue =
+        new ConcurrentQueue<string>();
     private readonly object _lineLock = new object();
 
     // Batch/Throttle
     [Header("Perf")]
     public bool showLiveDataText = false;
-    public int maxLinesPerFrame = 60;
+    public int maxLinesPerFrame = 800;
     private float _nextUiUpdateTime = 0f;
     private string _lastDataLine;
 
@@ -50,7 +63,11 @@ public class BleBridge : MonoBehaviour
     // ---------- Unity lifecycle ----------
     void Awake()
     {
-        if (Instance != null) { Destroy(gameObject); return; }
+        if (Instance != null)
+        {
+            Destroy(gameObject);
+            return;
+        }
         Instance = this;
         DontDestroyOnLoad(gameObject);
     }
@@ -78,30 +95,30 @@ public class BleBridge : MonoBehaviour
 
     void Update()
     {
-        // Κατανάλωσε γραμμές σε batches για να μην “πνίγεται” το main thread
+        // Consume lines in batches so we don't choke the main thread
         int processed = 0;
         while (processed < maxLinesPerFrame && _lineQueue.TryDequeue(out var line))
         {
-            // 1) δώσε raw line σε listeners (π.χ. ImuVisualizer)
+            // 1) Fire raw line event
             OnLine?.Invoke(line);
 
-            // 2) εφάρμοσε στο scene
+            // 2) Apply to scene (parse + send to MotionManager)
             ParseLine_MainThread(line);
 
-            // 3) κράτα τελευταία για εμφάνιση
+            // 3) Remember last for optional UI
             _lastDataLine = line;
             processed++;
         }
 
         // Throttle UI (π.χ. 10Hz)
-        if (dataText && Time.unscaledTime >= _nextUiUpdateTime)
+        if (showLiveDataText && dataText && Time.unscaledTime >= _nextUiUpdateTime)
         {
             dataText.text = _lastDataLine ?? "";
-            _nextUiUpdateTime = Time.unscaledTime + 0.1f;
+            _nextUiUpdateTime = Time.unscaledTime + 0.1f; // 10 Hz
         }
     }
 
-    // ---- UI Buttons ----
+    // ---------- UI Buttons ----------
     public void RequestBlePermissions()
     {
         var callbacks = new PermissionCallbacks();
@@ -113,7 +130,7 @@ public class BleBridge : MonoBehaviour
             {
                 "android.permission.BLUETOOTH_SCAN",
                 "android.permission.BLUETOOTH_CONNECT",
-                // μερικοί vendors ακόμη ζητούν FINE_LOCATION για scan
+                // some vendors still require FINE_LOCATION for scan
                 "android.permission.ACCESS_FINE_LOCATION"
             }, callbacks);
         }
@@ -149,18 +166,18 @@ public class BleBridge : MonoBehaviour
         SetStatus("Connecting to " + arduinoAddress + " …");
     }
 
-    // ---- Callbacks από το Java plugin ----
+    // ---------- Callbacks from Java plugin ----------
     public void HandleDeviceFound(string name, string address)
     {
-        // Binder thread → γύρνα main thread
+        // Binder thread → main thread
         UnityMainThreadDispatcher.Instance().Enqueue(() =>
         {
             if (devicesText) devicesText.text += $"{name} [{address}]\n";
 
-            // Event προς subscribers
+            // Event to subscribers
             OnDeviceFound?.Invoke(name, address);
 
-            // Simple filter για auto-connect UI
+            // Simple auto-connect filter
             if (!string.IsNullOrEmpty(name) && name.Contains("ArmIMU"))
             {
                 arduinoAddress = address;
@@ -170,22 +187,31 @@ public class BleBridge : MonoBehaviour
         });
     }
 
+    bool _mtuRequested;
+
     public void OnStatusUpdate(string msg)
     {
         UnityMainThreadDispatcher.Instance().Enqueue(() =>
         {
             SetStatus("Status: " + msg);
             OnStatus?.Invoke(msg);
+
+            var low = msg.ToLowerInvariant();
+            if (!_mtuRequested && (low.Contains("connected") || low.Contains("ready")))
+            {
+                _mtuRequested = true;
+                StopScan();
+                RequestMtu(185); // ή 247 αν το firmware το υποστηρίζει
+            }
         });
     }
 
-    // μπορεί να έρθουν chunks. Εδώ κάνουμε reassembly ανά γραμμή \n (THREAD-SAFE)
+    // May arrive in chunks; here we reassemble lines by '\n' (THREAD-SAFE)
     public void OnDataReceived(string chunk)
     {
         if (string.IsNullOrEmpty(chunk)) return;
 
-        // 1) Μαζεύουμε τις πλήρεις γραμμές με lock (αποφυγή races)
-        System.Collections.Generic.List<string> readyLines = new System.Collections.Generic.List<string>();
+        var readyLines = new List<string>();
 
         lock (_lineLock)
         {
@@ -196,64 +222,82 @@ public class BleBridge : MonoBehaviour
                 int nl = IndexOfNewline(lineBuffer);
                 if (nl < 0) break;
 
-                // Πάρε την πλήρη γραμμή (χωρίς '\n'), trim '\r' αν υπάρχει
+                // Take line without '\n', trim '\r' if present
                 string line = lineBuffer.ToString(0, nl);
                 if (line.EndsWith("\r")) line = line.Substring(0, line.Length - 1);
 
-                // Αφαίρεσε ό,τι κατανάλωσες (+1 για το '\n')
+                // Remove consumed (+1 για το '\n')
                 lineBuffer.Remove(0, nl + 1);
 
                 if (!string.IsNullOrWhiteSpace(line))
                     readyLines.Add(line);
             }
 
-            // Προστασία από υπερβολικό growth αν δεν έρχονται newlines
+            // Protect from huge growth if no newlines
             const int MAX_BUFFER = 32 * 1024;
             if (lineBuffer.Length > MAX_BUFFER)
                 lineBuffer.Remove(0, lineBuffer.Length - MAX_BUFFER / 2);
         }
 
-        // 2) Αν η ουρά έχει φουσκώσει, πέτα παλιές γραμμές για να μη γίνει lag
+        // If queue is huge, drop old lines to avoid lag
         if (_lineQueue.Count > MAX_QUEUE_SIZE)
         {
             while (_lineQueue.TryDequeue(out _)) { }
         }
 
-        // 3) Enqueue τις πλήρεις γραμμές — θα καταναλωθούν batch στο Update()
+        // Enqueue lines for consumption in Update()
         foreach (var line in readyLines)
             _lineQueue.Enqueue(line);
     }
 
-
-    // Υποστηρίζουμε:
-    //  - "id,qx,qy,qz,qw"  (quaternion)
-    //  - "id,roll,pitch,yaw"  (μοίρες)
+    // Supports:
+    //  - "id,qx,qy,qz,qw"  (XYZW)
+    //  - "id,qw,qx,qy,qz"  (WXYZ)  -> αλλάζεις από το Inspector
     private void ParseLine_MainThread(string line)
     {
         var parts = line.Split(',');
-        if (parts.Length < 4) return;
+        if (parts.Length != 5) return;
+
+        // 0: id
         if (!int.TryParse(parts[0], out int id)) return;
+        if (id < 0 || id > 2) return; // μόνο 0,1,2
 
-        // Προσπάθεια ως quaternion
-        if (parts.Length >= 5 &&
-            float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float qx) &&
-            float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float qy) &&
-            float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float qz) &&
-            float.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out float qw))
+        // 1–4: quaternion components as floats
+        if (!float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float a)) return;
+        if (!float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float b)) return;
+        if (!float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float c)) return;
+        if (!float.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out float d)) return;
+
+        float qx, qy, qz, qw;
+
+        if (quaternionFormat == QuaternionFormat.XYZW)
         {
-            var q = new Quaternion(qx, qy, qz, qw);
-            motionManager?.UpdateSensorRotation(id, q);
-            return;
+            // Arduino: id,qx,qy,qz,qw
+            qx = a;
+            qy = b;
+            qz = c;
+            qw = d;
+        }
+        else
+        {
+            // WXYZ: id,qw,qx,qy,qz
+            qw = a;
+            qx = b;
+            qy = c;
+            qz = d;
         }
 
-        // Αλλιώς, προσπάθεια ως Euler (μοίρες)
-        if (float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float roll) &&
-            float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float pitch) &&
-            float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float yaw))
-        {
-            var q = Quaternion.Euler(roll, pitch, yaw); // Unity παίρνει deg
-            motionManager?.UpdateSensorRotation(id, q);
-        }
+        // Optional axis inversion
+        if (invertX) qx = -qx;
+        if (invertY) qy = -qy;
+        if (invertZ) qz = -qz;
+
+        // Unity Quaternion(x, y, z, w)
+        var q = new Quaternion(qx, qy, qz, qw).normalized;
+
+        motionManager?.UpdateSensorRotation(id, q);
+
+        _lastDataLine = line;
     }
 
     // ---------- Helpers ----------
@@ -269,7 +313,7 @@ public class BleBridge : MonoBehaviour
             return unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
     }
 
-    // ---------- Compatibility API για άλλα scripts ----------
+    // ---------- Compatibility API ----------
     public void StopScan()
     {
         if (bleManager == null) { SetStatus("StopScan: bleManager is null"); return; }
@@ -309,24 +353,49 @@ public class BleBridge : MonoBehaviour
         try { bleManager.Call<bool>("writeAscii", ascii); }
         catch (System.Exception e) { SetStatus("Write error: " + e.Message); }
     }
+
+    // ---------- Convenience for UI buttons ----------
+
+    // Sends "reset" to Arduino (resets Madgwick; you can also add gyro bias there)
+    public void ResetImus()
+    {
+        Write("reset\n");
+        SetStatus("Sent 'reset' to IMUs");
+    }
+
+    // Calibration button: use current pose as reference
+    public void CalibrateArmToCurrentPose()
+    {
+        if (motionManager != null)
+        {
+            motionManager.CalibrateToCurrentPose();
+            SetStatus("Calibration requested");
+        }
+        else
+        {
+            SetStatus("Calibration failed: MotionManager not assigned");
+        }
+    }
 }
 
 // --- BLE callback proxy ---
 class BleCallbackProxy : AndroidJavaProxy
 {
     private readonly BleBridge bridge;
-    public BleCallbackProxy(BleBridge b) : base("com.mbrats01.ble_manager.BleCallback") { bridge = b; }
+    public BleCallbackProxy(BleBridge b) : base("com.mbrats01.ble_manager.BleCallback")
+    {
+        bridge = b;
+    }
 
-    // Υπογραφές να ταιριάζουν 1:1 με το Java interface
+    // Signatures must match the Java interface
     public void onStatusUpdate(string message) => bridge.OnStatusUpdate(message);
     public void onDeviceFound(string name, string addr) => bridge.HandleDeviceFound(name, addr);
     public void onDataReceived(string data) => bridge.OnDataReceived(data);
 
     public void onDataReceivedBytes(byte[] bytes)
     {
-        // Αν το χρειαστείς αργότερα:
+        // If you ever want binary packets instead of text:
         // var text = System.Text.Encoding.UTF8.GetString(bytes);
         // bridge.OnDataReceived(text);
     }
 }
-    

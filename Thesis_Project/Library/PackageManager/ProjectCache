@@ -5,7 +5,7 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638950021341372327
+      ticks: 638988064158569920
     m_Hash: 3111486270
   m_LockFileStatus:
     m_FilePath: C:/Users/mprat/Thesis/Thesis/Thesis_Project/Packages/packages-lock.json
@@ -13,7 +13,7 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638950021695164013
+      ticks: 638988064254673756
     m_Hash: 108961974
 m_EmbeddedPackageManifests:
   m_ManifestsStatus: {}
@@ -183,6 +183,7 @@ m_ResolvedPackages:
     - 1.14.1
     - 1.14.2
     - 1.15.0
+    - 1.16.0
     compatible:
     - 1.11.2
     - 1.12.0
@@ -192,6 +193,7 @@ m_ResolvedPackages:
     - 1.14.1
     - 1.14.2
     - 1.15.0
+    - 1.16.0
     recommended: 1.11.2
     deprecated: []
   dependencies:
@@ -463,6 +465,7 @@ m_ResolvedPackages:
     - 3.2.0-pre.11
     - 3.2.0-pre.12
     - 3.2.0-pre.13
+    - 3.2.0-pre.14
     - 4.0.0-pre.1
     - 4.0.0-pre.2
     compatible:
@@ -482,6 +485,7 @@ m_ResolvedPackages:
     - 3.2.0-pre.11
     - 3.2.0-pre.12
     - 3.2.0-pre.13
+    - 3.2.0-pre.14
     - 4.0.0-pre.1
     - 4.0.0-pre.2
     recommended: 3.0.9
