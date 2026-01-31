@@ -35,7 +35,6 @@ public class BleBridge : MonoBehaviour
     public TextMeshProUGUI devicesText;
     public TextMeshProUGUI dataText;
     public GameObject connectButton;      // optional
-    public MotionManager motionManager;   // διαχειρίζεται το rig του χεριού
 
     private AndroidJavaObject bleManager;
     private string arduinoAddress;
@@ -295,7 +294,6 @@ public class BleBridge : MonoBehaviour
         // Unity Quaternion(x, y, z, w)
         var q = new Quaternion(qx, qy, qz, qw).normalized;
 
-        motionManager?.UpdateSensorRotation(id, q);
 
         _lastDataLine = line;
     }
@@ -361,20 +359,6 @@ public class BleBridge : MonoBehaviour
     {
         Write("reset\n");
         SetStatus("Sent 'reset' to IMUs");
-    }
-
-    // Calibration button: use current pose as reference
-    public void CalibrateArmToCurrentPose()
-    {
-        if (motionManager != null)
-        {
-            motionManager.CalibrateToCurrentPose();
-            SetStatus("Calibration requested");
-        }
-        else
-        {
-            SetStatus("Calibration failed: MotionManager not assigned");
-        }
     }
 }
 
