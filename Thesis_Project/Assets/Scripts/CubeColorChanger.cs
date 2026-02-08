@@ -12,16 +12,19 @@ public class CubeColorChanger : MonoBehaviour
         originalColor = meshRenderer.material.color;
     }
 
-    private void OnCollisionEnter(Collision collision)
+    private void OnTriggerEnter(Collider other)
     {
-        if (collision.gameObject.CompareTag("Player") || collision.gameObject.name.Contains("Human"))
+        if (other.gameObject.CompareTag("Player") || other.gameObject.name.Contains("Human"))
         {
             meshRenderer.material.color = contactColor;
         }
     }
 
-    private void OnCollisionExit(Collision collision)
+    private void OnTriggerExit(Collider other)
     {
-        meshRenderer.material.color = originalColor;
+        if (other.gameObject.CompareTag("Player") || other.gameObject.name.Contains("Human"))
+        {
+            meshRenderer.material.color = originalColor;
+        }
     }
 }
