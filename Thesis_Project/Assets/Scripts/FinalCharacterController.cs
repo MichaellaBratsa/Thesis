@@ -1,109 +1,74 @@
 ﻿using UnityEngine;
 using System.Globalization;
+using TMPro;
 
-// Controls a character's bones (shoulder, wrist, elbow)
-// using quaternion data coming from BLE/Arduino.
 public class FinalCharacterController : MonoBehaviour
 {
-    // Which axis (X/Y/Z) from the incoming Euler delta
-    // should drive pitch/yaw/roll.
-    public enum SourceAxis
-    {
-        X,
-        Y,
-        Z
-    }
+    public enum SourceAxis { X, Y, Z }
+
+    public TextMeshProUGUI elbowAngle, shoulderAngle;
 
     [System.Serializable]
-    public class BoneConfig
+    public class Bone
     {
-        // The bone Transform in the rig that will be rotated.
         public Transform bone;
         public string Name = "Sensor";
 
         [Header("Axis Mapping & Sensitivity")]
-        // Choose which incoming axis drives the bone's pitch (X rotation).
         public SourceAxis Source_For_Pitch = SourceAxis.X;
-
-        [Range(-2f, 2f)]
-        public float Pitch_Multiplier = 1f;
-
-        // Choose which incoming axis drives the bone's yaw (Y rotation).
+        [Range(-2f, 2f)] public float Pitch_Multiplier = 1f;
         public SourceAxis Source_For_Yaw = SourceAxis.Y;
-
-        [Range(-2f, 2f)]
-        public float Yaw_Multiplier = 1f;
-
-        // Choose which incoming axis drives the bone's roll (Z rotation).
+        [Range(-2f, 2f)] public float Yaw_Multiplier = 1f;
         public SourceAxis Source_For_Roll = SourceAxis.Z;
+        [Range(-2f, 2f)] public float Roll_Multiplier = 1f;
 
-        [Range(-2f, 2f)]
-        public float Roll_Multiplier = 1f;
+        [Header("Smoothing")]
+        [Range(1f, 50f)] public float SmoothSpeed = 20f;
 
-        [Header("Smoothing (Noise Filter)")]
-        // Higher values = faster response,
-        // lower values = smoother but laggier motion.
-        [Range(1f, 50f)]
-        public float SmoothSpeed = 20f;
-
-        // Stores the "zero pose" quaternion captured during calibration.
-        [HideInInspector]
-        public Quaternion calibrationOffset = Quaternion.identity;
-
-        // The bone's initial world rotation at Start().
-        [HideInInspector]
-        public Quaternion initialWorldRot;
+        [HideInInspector] public Quaternion calibrationOffset = Quaternion.identity;
+        [HideInInspector] public Quaternion initialWorldRot;
     }
 
-    // Bone driven by sensor index 0
-    public BoneConfig Shoulder;
+    public Bone Elbow; //Sensor id = 1
+    public Bone Shoulder; //Sensor id = 2
 
-    // Bone driven by sensor index 1
-    public BoneConfig Wrist;
-
-    // Bone driven by sensor index 2
-    public BoneConfig Elbow;
-
-    // Accumulates incoming BLE text until we have full lines ending with '\n'.
-    private string buffer = "";
-
-    // When true, the next processed frame will capture calibration offsets.
+    private string buffer = ""; // Buffers incoming BLE data to handle partial messages
     private bool calibrateNextFrame = false;
 
     void Start()
     {
-        // Cache initial bone rotations.
-        if (Shoulder.bone)
-            Shoulder.initialWorldRot = Shoulder.bone.rotation;
-
-        if (Wrist.bone)
-            Wrist.initialWorldRot = Wrist.bone.rotation;
-
+        // Capture the initial pose of the character model
         if (Elbow.bone)
+        {
             Elbow.initialWorldRot = Elbow.bone.rotation;
+            elbowAngle.text = "Elbow";
+        }
 
-        // Subscribe to BLE packet event.
+        if (Shoulder.bone)
+        {
+            Shoulder.initialWorldRot = Shoulder.bone.rotation;
+            shoulderAngle.text = "Shoulder";
+        }
+
+        // Subscribe to the Bluetooth receiver's data event
         if (SimpleBleReceiver.Instance != null)
             SimpleBleReceiver.Instance.OnPacketReceived += ProcessData;
     }
 
-    public void CalibratePlayer()
-    {
-        // Request a calibration capture on the next parse.
-        calibrateNextFrame = true;
-    }
+    public void CalibratePlayer() => calibrateNextFrame = true;
 
     void ProcessData(string rawData)
     {
         buffer += rawData;
-
         int newlineIdx = buffer.IndexOf('\n');
+
+        // Process every complete line found in the buffer
         while (newlineIdx >= 0)
         {
             string line = buffer.Substring(0, newlineIdx).Trim();
             buffer = buffer.Substring(newlineIdx + 1);
 
-            if (line.StartsWith("ALL:"))
+            if (line.StartsWith("ALL:")) 
                 ParseLine(line);
 
             newlineIdx = buffer.IndexOf('\n');
@@ -114,85 +79,100 @@ public class FinalCharacterController : MonoBehaviour
     {
         try
         {
-            // Remove "ALL:" prefix.
+            // Remove "ALL:" prefix and split the sensor groups (expected format: ALL:quat1|quat2|quat3)
             string content = line.Substring(4);
-
-            // Each sensor quaternion separated by '|'.
             string[] sensors = content.Split('|');
 
             for (int i = 0; i < sensors.Length; i++)
             {
-                if (i > 2)
-                    break;
 
-                string[] q = sensors[i].Split(',');
-                if (q.Length != 4)
+                Bone b = null;
+
+                // Identify which sensor index corresponds to which bone
+                if (i == 1) 
+                    b = Elbow;
+                else if (i == 2) 
+                    b = Shoulder;
+
+                if (b == null || b.bone == null) 
                     continue;
 
+                string[] q = sensors[i].Split(',');
+
+                if (q.Length != 4) 
+                    continue;
+
+                // Split individual Quaternion components (x,y,z,w)
                 float x = float.Parse(q[0], CultureInfo.InvariantCulture);
                 float y = float.Parse(q[1], CultureInfo.InvariantCulture);
                 float z = float.Parse(q[2], CultureInfo.InvariantCulture);
                 float w = float.Parse(q[3], CultureInfo.InvariantCulture);
 
-                // Convert sensor coordinates to Unity coordinates.
+                // Reconstruct Quaternion and adjust coordinate system (Sensor space to Unity space)
                 Quaternion rawQ = new Quaternion(y, -z, -x, w);
                 Vector3 euler = rawQ.eulerAngles;
 
-                BoneConfig cfg =
-                    (i == 0) ? Shoulder :
-                    (i == 1) ? Wrist :
-                    Elbow;
+                if (calibrateNextFrame) 
+                    b.calibrationOffset = rawQ;
 
-                if (cfg.bone == null)
-                    continue;
+                // Calculate the difference between current sensor rotation and calibrated rotation
+                float dx = Mathf.DeltaAngle(b.calibrationOffset.eulerAngles.x, euler.x);
+                float dy = Mathf.DeltaAngle(b.calibrationOffset.eulerAngles.y, euler.y);
+                float dz = Mathf.DeltaAngle(b.calibrationOffset.eulerAngles.z, euler.z);
 
-                if (calibrateNextFrame)
-                    cfg.calibrationOffset = rawQ;
+                // Remap the sensor axes to the intended Unity axes based on user configuration
+                float worldX = GetVal(dx, dy, dz, b.Source_For_Pitch) * b.Pitch_Multiplier;
+                float worldY = GetVal(dx, dy, dz, b.Source_For_Yaw) * b.Yaw_Multiplier;
+                float worldZ = GetVal(dx, dy, dz, b.Source_For_Roll) * b.Roll_Multiplier;
 
-                float dx = Mathf.DeltaAngle(
-                    cfg.calibrationOffset.eulerAngles.x, euler.x);
-                float dy = Mathf.DeltaAngle(
-                    cfg.calibrationOffset.eulerAngles.y, euler.y);
-                float dz = Mathf.DeltaAngle(
-                    cfg.calibrationOffset.eulerAngles.z, euler.z);
+                showEulerAngles(i, worldX, worldY, worldZ);
 
-                float worldX =
-                    GetVal(dx, dy, dz, cfg.Source_For_Pitch) *
-                    cfg.Pitch_Multiplier;
+                // Apply the delta rotation to the original world rotation of the bone
+                Quaternion deltaRotation = Quaternion.Euler(worldX, worldY, worldZ);
+                Quaternion targetRotation = deltaRotation * b.initialWorldRot;
 
-                float worldY =
-                    GetVal(dx, dy, dz, cfg.Source_For_Yaw) *
-                    cfg.Yaw_Multiplier;
+                //showEulerAngles(i, worldX, worldY, worldZ);
 
-                float worldZ =
-                    GetVal(dx, dy, dz, cfg.Source_For_Roll) *
-                    cfg.Roll_Multiplier;
-
-                Quaternion deltaRotation =
-                    Quaternion.Euler(worldX, worldY, worldZ);
-
-                Quaternion targetRotation =
-                    deltaRotation * cfg.initialWorldRot;
-
-                cfg.bone.rotation = Quaternion.Slerp(
-                    cfg.bone.rotation,
-                    targetRotation,
-                    Time.deltaTime * cfg.SmoothSpeed
-                );
+                // Smoothly interpolate to the new rotation to avoid jitter
+                b.bone.rotation = Quaternion.Slerp(b.bone.rotation, targetRotation, Time.deltaTime * b.SmoothSpeed);
             }
-
-            if (calibrateNextFrame)
+            if (calibrateNextFrame) 
                 calibrateNextFrame = false;
         }
-        catch
+        catch { }
+    }
+
+    public void showEulerAngles(int sensorId, float x, float y, float z)
+    {
+        string label = "NULL";
+            
+        if (sensorId == 1)
+            label = "ELBOW";
+        else if (sensorId == 2)
+            label = "SHOULDER";
+
+        string data = $"{label}\n" +
+                      $"X: {x:F2}°\n" +
+                      $"Y: {y:F2}°\n" +
+                      $"Z: {z:F2}°";
+
+        if (sensorId == 1)
         {
+            elbowAngle.text = data;
+        }
+        else if (sensorId == 2)
+        {
+            shoulderAngle.text = data;
         }
     }
 
+    // Helper to pick the correct float value based on the Enum selection
     float GetVal(float x, float y, float z, SourceAxis axis)
     {
-        if (axis == SourceAxis.X) return x;
-        if (axis == SourceAxis.Y) return y;
+        if (axis == SourceAxis.X) 
+            return x;
+        if (axis == SourceAxis.Y) 
+            return y;
         return z;
     }
 }
