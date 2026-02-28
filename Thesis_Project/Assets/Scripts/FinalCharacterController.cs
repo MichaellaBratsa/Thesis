@@ -29,8 +29,8 @@ public class FinalCharacterController : MonoBehaviour
         [HideInInspector] public Quaternion initialWorldRot;
     }
 
-    public Bone Elbow; //Sensor id = 1
-    public Bone Shoulder; //Sensor id = 2
+    public Bone Elbow; //Sensor id = 0
+    public Bone Shoulder; //Sensor id = 1
 
     private string buffer = ""; // Buffers incoming BLE data to handle partial messages
     private bool calibrateNextFrame = false;
@@ -89,9 +89,9 @@ public class FinalCharacterController : MonoBehaviour
                 Bone b = null;
 
                 // Identify which sensor index corresponds to which bone
-                if (i == 1) 
+                if (i == 0) 
                     b = Elbow;
-                else if (i == 2) 
+                else if (i == 1) 
                     b = Shoulder;
 
                 if (b == null || b.bone == null) 
@@ -148,7 +148,7 @@ public class FinalCharacterController : MonoBehaviour
             
         if (sensorId == 1)
             label = "ELBOW";
-        else if (sensorId == 2)
+        else if (sensorId == 0)
             label = "SHOULDER";
 
         string data = $"{label}\n" +
@@ -156,11 +156,11 @@ public class FinalCharacterController : MonoBehaviour
                       $"Y: {y:F2}°\n" +
                       $"Z: {z:F2}°";
 
-        if (sensorId == 1)
+        if (sensorId == 0)
         {
             elbowAngle.text = data;
         }
-        else if (sensorId == 2)
+        else if (sensorId == 1)
         {
             shoulderAngle.text = data;
         }
