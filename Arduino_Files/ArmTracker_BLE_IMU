@@ -1,14 +1,13 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <ArduinoBLE.h>
-#include <Arduino_LSM9DS1.h>
+// #include <Arduino_LSM9DS1.h>
 
 //  ArmTracker: 3-IMU orientation tracking (quaternions via BLE)
 //
 //  Sensors:
-//   0 = Internal LSM9DS1 (Shoulder)
-//   1 = External MPU6050 = 0x69 (Wrist)
-//   2 = External MPU6050 = 0x68 (Elbow)
+//   0 = External MPU6050 = 0x69 (Elbow)
+//   1 = External MPU6050 = 0x68 (Shoulder)
 //
 //  Pipeline (every 20ms):
 //   1) Read accel + gyro for each sensor
@@ -45,8 +44,11 @@ struct Sensor {
     float gxBias = 0, gyBias = 0, gzBias = 0;
 };
 
-// Array of 3 sensors: 0=internal, 1=MPU wrist, 2=MPU elbow
-Sensor s[3];
+// Number of sensors
+#define NUM_SENSORS 2
+
+// Array of 2 sensors: 0=MPU elbow, 1=MPU shoulder
+Sensor s[NUM_SENSORS];
 
 void setupMPU(int addr) {
     // Wake up device (clear SLEEP bit)
@@ -158,7 +160,9 @@ void madgwick(int id,
     float s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
 
     // Normalize the gradient step vector
-    norm = 1.0f / sqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
+    float gradNorm = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
+    if (gradNorm == 0.0f) return;  // Avoid divide-by-zero
+    norm = 1.0f / sqrt(gradNorm);
     s0 *= norm; s1 *= norm; s2 *= norm; s3 *= norm;
 
     // Quaternion derivative from gyro + correction from accel (beta * gradient)
@@ -185,21 +189,18 @@ void madgwick(int id,
 void setup() {
     Serial.begin(115200);
 
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+
     Wire.begin();
     // Lower I2C clock can help stability with longer wires / noisy bus
     Wire.setClock(100000);
 
     // External sensor address mapping note:
     // If outputs seem swapped, you likely have the address mapping reversed.
-    // Here: 0x69 is Wrist, 0x68 is Elbow.
-    setupMPU(0x69); // Wrist
-    setupMPU(0x68); // Elbow
-
-    // Internal IMU init (LSM9DS1)
-    if (!IMU.begin()) {
-        Serial.println("Internal IMU Failed!");
-        while (1);
-    }
+    // Here: 0x69 is Elbow, 0x68 is Shoulder.
+    setupMPU(0x69); // Elbow
+    setupMPU(0x68); // Shoulder 
 
     // BLE init
     if (!BLE.begin()) {
@@ -217,26 +218,29 @@ void setup() {
 
     BLE.advertise();
 
+    for(int i=0; i<6; i++) {
+        digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Toggle LED
+        delay(500);
+    }
+
+    digitalWrite(LED_BUILTIN, HIGH);
+
     // --- Gyro bias calibration ---
     // We average gyro readings for each sensor and treat that average as "bias".
     // IMPORTANT: keep sensors completely still during this period.
     Serial.println("Calibrating... DO NOT MOVE.");
 
-    float d[3][6];          // [sensor][0..2 accel, 3..5 gyro]
-    int samples = 200;      // More samples = better bias estimate, slower boot
+    float d[NUM_SENSORS][6];  // [sensor][0..2 accel, 3..5 gyro]
+    int samples = 200;        // More samples = better bias estimate, slower boot
 
     for (int i = 0; i < samples; i++) {
-        // Sensor 0: internal LSM9DS1 gyro
-        if (IMU.gyroscopeAvailable()) {
-            IMU.readGyroscope(d[0][3], d[0][4], d[0][5]);
-        }
 
-        // Sensor 1 & 2: external MPUs
-        readMPU(0x69, d[1][0], d[1][1], d[1][2], d[1][3], d[1][4], d[1][5]);
-        readMPU(0x68, d[2][0], d[2][1], d[2][2], d[2][3], d[2][4], d[2][5]);
+        // Sensor 0 & 1: external MPUs
+        readMPU(0x69, d[0][0], d[0][1], d[0][2], d[0][3], d[0][4], d[0][5]);
+        readMPU(0x68, d[1][0], d[1][1], d[1][2], d[1][3], d[1][4], d[1][5]);
 
         // Accumulate gyro bias sum
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < NUM_SENSORS; k++) {  // Fixed: was k < 3
             s[k].gxBias += d[k][3];
             s[k].gyBias += d[k][4];
             s[k].gzBias += d[k][5];
@@ -246,17 +250,18 @@ void setup() {
     }
 
     // Convert sums to averages
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < NUM_SENSORS; k++) {  // Fixed: was k < 3
         s[k].gxBias /= samples;
         s[k].gyBias /= samples;
         s[k].gzBias /= samples;
     }
-
+    
+    digitalWrite(LED_BUILTIN, LOW);
     Serial.println("Ready.");
 }
 
 
-long lastT = 0;
+unsigned long lastT = 0;  // Changed to unsigned long (millis() returns unsigned long)
 
 
 //  - BLE.poll() keeps BLE stack responsive
@@ -270,38 +275,31 @@ void loop() {
         float dt = (millis() - lastT) / 1000.0f;
         lastT = millis();
 
-        float d[3][6];
+        float d[NUM_SENSORS][6];
 
-        // 1) Internal IMU (Shoulder / Sensor 0)
-        // Guard with availability checks to avoid stale reads
-        if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
-            IMU.readAcceleration(d[0][0], d[0][1], d[0][2]);
-            IMU.readGyroscope(d[0][3], d[0][4], d[0][5]);
-        }
+        // External MPUs (Shoulder/Elbow)
+        readMPU(0x69, d[0][0], d[0][1], d[0][2], d[0][3], d[0][4], d[0][5]);
+        readMPU(0x68, d[1][0], d[1][1], d[1][2], d[1][3], d[1][4], d[1][5]);
 
-        // 2) External MPUs (Wrist/Elbow)
-        readMPU(0x69, d[1][0], d[1][1], d[1][2], d[1][3], d[1][4], d[1][5]);
-        readMPU(0x68, d[2][0], d[2][1], d[2][2], d[2][3], d[2][4], d[2][5]);
-
-        // 3) Update orientation estimate for each sensor
-        for (int i = 0; i < 3; i++) {
+        // Update orientation estimate for each sensor
+        for (int i = 0; i < NUM_SENSORS; i++) {
             madgwick(i,
                      d[i][0], d[i][1], d[i][2],   // accel
                      d[i][3], d[i][4], d[i][5],   // gyro
                      dt);
         }
 
-        // 4) Build BLE packet (string)
+        // Build BLE packet (string)
         // Format:
-        //  ALL:q1,q2,q3,q0|q1,q2,q3,q0|q1,q2,q3,q0
+        //  ALL:q1,q2,q3,q0|q1,q2,q3,q0
         // Note: quaternion ordering here is x,y,z,w (q1,q2,q3,q0)
         // Be consistent with your receiving app/Unity/etc.
         String p = "ALL:";
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < NUM_SENSORS; i++) {
             p += String(s[i].q1, 3) + "," + String(s[i].q2, 3) + "," +
                  String(s[i].q3, 3) + "," + String(s[i].q0, 3);
 
-            if (i < 2) p += "|";
+            if (i < NUM_SENSORS - 1) p += "|";  // Fixed: was i < 2 (always true)
         }
         p += "\n";
 
