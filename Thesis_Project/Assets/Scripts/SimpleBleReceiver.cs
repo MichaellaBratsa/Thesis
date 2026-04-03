@@ -31,21 +31,21 @@ public class SimpleBleReceiver : MonoBehaviour
 
     void Start()
     {
-        // Request runtime permissions (especially needed on Android 12+ for BLE scan/connect).
+        // Έλεγχος και αίτηση για Τοποθεσία (ΑΠΑΡΑΙΤΗΤΟ για Android 10)
+        if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
+        {
+            Permission.RequestUserPermission(Permission.FineLocation);
+        }
+
+        // Έλεγχος και αίτηση για Android 12+ (Αν το τρέξεις ποτέ σε νεότερο κινητό)
         if (!Permission.HasUserAuthorizedPermission("android.permission.BLUETOOTH_SCAN") ||
             !Permission.HasUserAuthorizedPermission("android.permission.BLUETOOTH_CONNECT"))
         {
-            // Request BLE scan permission.
             Permission.RequestUserPermission("android.permission.BLUETOOTH_SCAN");
-
-            // Request BLE connect permission.
             Permission.RequestUserPermission("android.permission.BLUETOOTH_CONNECT");
-
-            // Request location permission (often required for BLE scanning on older Android versions / some devices).
-            Permission.RequestUserPermission("android.permission.ACCESS_FINE_LOCATION");
         }
 
-        // Initialize the Android BLE plugin bridge.
+        // Αρχικοποίηση του plugin
         InitializePlugin();
     }
 
@@ -102,11 +102,19 @@ public class SimpleBleReceiver : MonoBehaviour
     // Called by the Android plugin when connection/status updates happen.
     public void OnStatus(string status)
     {
-        // When connected, request a larger MTU for faster / bigger packets.
-        if (status.ToLower().Contains("connected"))
+        // Μετατροπή σε πεζά για να είναι πιο εύκολος ο έλεγχος
+        string s = status.ToLower();
+
+        // Εκτύπωση για να βλέπεις τι γίνεται στην κονσόλα του Unity
+        UnityEngine.Debug.Log("BLE Status: " + status);
+
+        // Αντί για "connected", περιμένουμε το "ready" που στέλνει η Java
+        // ΑΦΟΥ έχει τελειώσει με επιτυχία το discoverServices και το notify!
+        if (s.Contains("ready"))
         {
-            // Request MTU 185 (common value for improved throughput).
+            // Τώρα είναι 100% ασφαλές να ζητήσουμε το MTU
             bleManager.Call("requestMtu", 185);
+            UnityEngine.Debug.Log("Requested MTU 185 from C#");
         }
     }
 

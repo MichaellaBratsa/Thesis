@@ -63,7 +63,6 @@ public class BleManager {
         this.unityCallback = callback;
     }
 
-<<<<<<< HEAD
     // ---------- Permission helpers ----------
     private boolean hasScanPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -84,8 +83,6 @@ public class BleManager {
     // ---------- Public API ----------
 
     /** Έναρξη σάρωσης */
-=======
->>>>>>> a833e458781332f64dd7521a4431eb7039513c5f
     public void startScan() {
         Log.d(TAG, "startScan called.");
 
@@ -101,18 +98,15 @@ public class BleManager {
             return;
         }
 
-<<<<<<< HEAD
         try {
             scanner = bluetoothAdapter.getBluetoothLeScanner();
             if (scanner == null) {
                 if (unityCallback != null) unityCallback.onStatusUpdate("BLE scanner not available.");
                 return;
             }
-=======
         scanner = bluetoothAdapter.getBluetoothLeScanner();
         handler.postDelayed(this::stopScan, 10000); // 10 sec
         isScanning = true;
->>>>>>> a833e458781332f64dd7521a4431eb7039513c5f
 
             handler.postDelayed(this::stopScan, 10_000); // 10 sec timeout
             isScanning = true;
@@ -211,7 +205,6 @@ public class BleManager {
         }
     }
 
-<<<<<<< HEAD
     /** Ζήτα MTU (π.χ. 185/247/517) */
     public void requestMtu(int mtu) {
         if (bluetoothGatt == null) return;
@@ -253,7 +246,6 @@ public class BleManager {
     }
 
     // ---------- Scan callback ----------
-=======
     private boolean hasScanPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
@@ -271,7 +263,6 @@ public class BleManager {
     }
 
     /** Callback scan */
->>>>>>> a833e458781332f64dd7521a4431eb7039513c5f
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
