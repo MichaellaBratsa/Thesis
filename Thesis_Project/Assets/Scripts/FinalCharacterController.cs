@@ -8,8 +8,11 @@ public class FinalCharacterController : MonoBehaviour
     public enum ArmSide { Right, Left }
 
     [Header("UI & State")]
-    public TextMeshProUGUI elbowAngle, shoulderAngle;
-    public ArmSide currentArm = ArmSide.Right; 
+    public ArmSide currentArm = ArmSide.Right;
+    [SerializeField] private GameObject rightHand;
+    [SerializeField] private GameObject leftHand;
+
+    public TMP_Text statusText;
 
     [System.Serializable]
     public class Bone
@@ -27,12 +30,6 @@ public class FinalCharacterController : MonoBehaviour
         public SourceAxis Source_For_Roll = SourceAxis.Z;
         [Range(-2f, 2f)] public float Roll_Multiplier = 1f;
 
-        [Header("Left Arm Mirroring")]
-        [Tooltip("Επίλεξε ποιοι άξονες θα αντιστρέφονται όταν φορεθεί στο αριστερό χέρι.")]
-        public bool InvertPitchOnLeft = false;
-        public bool InvertYawOnLeft = true;
-        public bool InvertRollOnLeft = true;
-
         [Header("Smoothing")]
         [Range(1f, 50f)] public float SmoothSpeed = 20f;
 
@@ -40,28 +37,71 @@ public class FinalCharacterController : MonoBehaviour
         [HideInInspector] public Quaternion initialWorldRot;
     }
 
-    public Bone Elbow; //Sensor id = 0
-    public Bone Shoulder; //Sensor id = 1
+    [System.Serializable] // Χρειάζεται για να το δείχνει ο Inspector
+    public class Left_Bone : Bone
+    {
+        [Header("Left Arm Mirroring")]
+        public bool InvertPitchOnLeft = true;
+        public bool InvertYawOnLeft = false;
+        public bool InvertRollOnLeft = true;
+    }
+
+    [Header("Right Arm Bones")]
+    public Bone RightElbow;
+    public Bone RightShoulder;
+
+    [Header("Left Arm Bones")]
+    public Left_Bone LeftElbow;
+    public Left_Bone LeftShoulder;
 
     private string buffer = "";
     private bool calibrateNextFrame = false;
 
     void Start()
     {
-        if (Elbow.bone)
-        {
-            Elbow.initialWorldRot = Elbow.bone.rotation;
-            elbowAngle.text = "Elbow";
-        }
+        //SetWhichArm();
+        CheckHand();
 
-        if (Shoulder.bone)
-        {
-            Shoulder.initialWorldRot = Shoulder.bone.rotation;
-            shoulderAngle.text = "Shoulder";
-        }
+        if (RightElbow.bone) RightElbow.initialWorldRot = RightElbow.bone.rotation;
+        if (RightShoulder.bone) RightShoulder.initialWorldRot = RightShoulder.bone.rotation;
+
+        if (LeftElbow.bone) LeftElbow.initialWorldRot = LeftElbow.bone.rotation;
+        if (LeftShoulder.bone) LeftShoulder.initialWorldRot = LeftShoulder.bone.rotation;
 
         if (SimpleBleReceiver.Instance != null)
             SimpleBleReceiver.Instance.OnPacketReceived += ProcessData;
+    }
+
+    //public void SetWhichArm()
+    //{
+    //    if (GameManager.Instance.isRightHanded == true)
+    //        currentArm = ArmSide.Right;
+    //    else
+    //        currentArm = ArmSide.Left;
+    //}
+
+    public void UpdateArmVisibility()
+    {
+        if (currentArm == ArmSide.Right)
+        {
+            if (leftHand != null) leftHand.SetActive(false);
+            if (rightHand != null) rightHand.SetActive(true);
+        }
+        else
+        {
+            if (rightHand != null) rightHand.SetActive(false);
+            if (leftHand != null) leftHand.SetActive(true);
+        }
+    }
+
+    public void CheckHand()
+    {
+        UpdateArmVisibility();
+
+        if (currentArm == ArmSide.Right)
+            SetRightArm();
+        else
+            SetLeftArm();
     }
 
     public void CalibratePlayer() => calibrateNextFrame = true;
@@ -69,19 +109,39 @@ public class FinalCharacterController : MonoBehaviour
     public void SetRightArm()
     {
         currentArm = ArmSide.Right;
-        CalibratePlayer(); 
+        UpdateArmVisibility();
+        ResetInactiveArm();
+        CalibratePlayer();
     }
 
     public void SetLeftArm()
     {
         currentArm = ArmSide.Left;
-        CalibratePlayer(); 
+        UpdateArmVisibility();
+        ResetInactiveArm();
+        CalibratePlayer();
     }
 
     public void ToggleArmSide()
     {
         currentArm = (currentArm == ArmSide.Right) ? ArmSide.Left : ArmSide.Right;
+        UpdateArmVisibility();
+        ResetInactiveArm();
         CalibratePlayer();
+    }
+
+    private void ResetInactiveArm()
+    {
+        if (currentArm == ArmSide.Right)
+        {
+            if (LeftElbow.bone) LeftElbow.bone.rotation = LeftElbow.initialWorldRot;
+            if (LeftShoulder.bone) LeftShoulder.bone.rotation = LeftShoulder.initialWorldRot;
+        }
+        else
+        {
+            if (RightElbow.bone) RightElbow.bone.rotation = RightElbow.initialWorldRot;
+            if (RightShoulder.bone) RightShoulder.bone.rotation = RightShoulder.initialWorldRot;
+        }
     }
 
     void ProcessData(string rawData)
@@ -112,13 +172,20 @@ public class FinalCharacterController : MonoBehaviour
             {
                 Bone b = null;
 
-                if (i == 0) b = Elbow;
-                else if (i == 1) b = Shoulder;
+                if (currentArm == ArmSide.Right)
+                {
+                    if (i == 0) b = RightElbow;
+                    else if (i == 1) b = RightShoulder;
+                }
+                else
+                {
+                    if (i == 0) b = LeftElbow;
+                    else if (i == 1) b = LeftShoulder;
+                }
 
                 if (b == null || b.bone == null) continue;
 
                 string[] q = sensors[i].Split(',');
-
                 if (q.Length != 4) continue;
 
                 float x = float.Parse(q[0], CultureInfo.InvariantCulture);
@@ -136,40 +203,56 @@ public class FinalCharacterController : MonoBehaviour
                 float dy = Mathf.DeltaAngle(b.calibrationOffset.eulerAngles.y, euler.y);
                 float dz = Mathf.DeltaAngle(b.calibrationOffset.eulerAngles.z, euler.z);
 
-                float pMult = b.Pitch_Multiplier * ((currentArm == ArmSide.Left && b.InvertPitchOnLeft) ? -1f : 1f);
-                float yMult = b.Yaw_Multiplier * ((currentArm == ArmSide.Left && b.InvertYawOnLeft) ? -1f : 1f);
-                float rMult = b.Roll_Multiplier * ((currentArm == ArmSide.Left && b.InvertRollOnLeft) ? -1f : 1f);
+                // ΕΔΩ ΕΙΝΑΙ Η ΑΛΛΑΓΗ ΓΙΑ ΝΑ ΔΟΥΛΕΨΕΙ ΤΟ LEFT BONE
+                float pMult = b.Pitch_Multiplier;
+                float yMult = b.Yaw_Multiplier;
+                float rMult = b.Roll_Multiplier;
+
+                // Ελέγχουμε αν πρόκειται για το αριστερό χέρι ΚΑΙ αν το "b" είναι τύπου Left_Bone
+                if (currentArm == ArmSide.Left && b is Left_Bone leftB)
+                {
+                    if (leftB.InvertPitchOnLeft) pMult *= -1f;
+                    if (leftB.InvertYawOnLeft) yMult *= -1f;
+                    if (leftB.InvertRollOnLeft) rMult *= -1f;
+                }
 
                 float worldX = GetVal(dx, dy, dz, b.Source_For_Pitch) * pMult;
                 float worldY = GetVal(dx, dy, dz, b.Source_For_Yaw) * yMult;
                 float worldZ = GetVal(dx, dy, dz, b.Source_For_Roll) * rMult;
-
-                showEulerAngles(i, worldX, worldY, worldZ);
 
                 Quaternion deltaRotation = Quaternion.Euler(worldX, worldY, worldZ);
                 Quaternion targetRotation = deltaRotation * b.initialWorldRot;
 
                 b.bone.rotation = Quaternion.Slerp(b.bone.rotation, targetRotation, Time.deltaTime * b.SmoothSpeed);
             }
+
             if (calibrateNextFrame)
+            {
                 calibrateNextFrame = false;
+                Invoke(nameof(ShowCalibrationMessage), 2f);
+            }
         }
         catch { }
     }
 
-    public void showEulerAngles(int sensorId, float x, float y, float z)
+    void ShowCalibrationMessage()
     {
-        string label = (sensorId == 1) ? "ELBOW" : (sensorId == 0) ? "SHOULDER" : "NULL";
+        if (statusText != null)
+        {
+            CancelInvoke(nameof(HideStatusText));
 
-        string sidePrefix = currentArm == ArmSide.Right ? "[R]" : "[L]";
+            statusText.gameObject.SetActive(true);
+            statusText.text = "Calibration Completed!";
+            statusText.color = Color.cyan;
 
-        string data = $"{sidePrefix} {label}\n" +
-                      $"X: {x:F2}°\n" +
-                      $"Y: {y:F2}°\n" +
-                      $"Z: {z:F2}°";
+            Invoke(nameof(HideStatusText), 3f);
+        }
+    }
 
-        if (sensorId == 0) elbowAngle.text = data;
-        else if (sensorId == 1) shoulderAngle.text = data;
+    void HideStatusText()
+    {
+        if (statusText != null)
+            statusText.gameObject.SetActive(false);
     }
 
     float GetVal(float x, float y, float z, SourceAxis axis)
